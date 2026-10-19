@@ -1,0 +1,68 @@
+name: Build and push SSH images
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: alp:24
+            dir: alp-24
+          - tag: deb:10
+            dir: deb-10
+          - tag: deb:11
+            dir: deb-11
+          - tag: deb:12
+            dir: deb-12
+          - tag: deb:13
+            dir: deb-13
+          - tag: ubu:20
+            dir: ubu-20
+          - tag: ubu:22
+            dir: ubu-22
+          - tag: ubu:24
+            dir: ubu-24
+          - tag: ubu:26
+            dir: ubu-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.dir }}
+          load: true
+          tags: maxtechnical/${{ matrix.tag }}
+
+      - name: Smoke test SSH
+        run: |
+          docker run -d --name smoke -e ROOT_PASSWORD=SmokeTest123 -p 2222:22 maxtechnical/${{ matrix.tag }}
+          python3 - <<'PYEOF'
+          import socket, time, sys
+          ok = False
+          for _ in range(30):
+              try:
+                  s = socket.create_connection(("127.0.0.1", 2222), timeout=3)
+                  banner = s.recv(64)
+                  s.close()
+                  if banner.startswith(b"SSH-"):
+                      ok = True
+                      break
+              except Exception:
+                  pass
+              time.sleep(2)
+          sys.exit(0 if ok else 1)
+          PYEOF
+          echo "SSH banner OK"
+          docker rm -f smoke
+
+      - name: Push to Docker Hub
+        run: docker push maxtechnical/${{ matrix.tag }}
